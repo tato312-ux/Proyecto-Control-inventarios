@@ -1,34 +1,40 @@
 import { pool } from "../db.js";
+import { calculateUpdatedStock } from "../services/inventoryService.js";
+import { sendDatabaseError, sendError } from "../utils/http.js";
 
 export async function getMovements(_req, res) {
-  const query = `
-    SELECT
-      inventory_movements.*,
-      products.name AS product_name,
-      products.sku,
-      sales.sale_number,
-      users.full_name AS user_name
-    FROM inventory_movements
-    JOIN products ON products.id = inventory_movements.product_id
-    LEFT JOIN sales ON sales.id = inventory_movements.sale_id
-    LEFT JOIN users ON users.id = inventory_movements.user_id
-    ORDER BY inventory_movements.created_at DESC
-  `;
-  const { rows } = await pool.query(query);
-  return res.json(rows);
+  try {
+    const query = `
+      SELECT
+        inventory_movements.*,
+        products.name AS product_name,
+        products.sku,
+        sales.sale_number,
+        users.full_name AS user_name
+      FROM inventory_movements
+      JOIN products ON products.id = inventory_movements.product_id
+      LEFT JOIN sales ON sales.id = inventory_movements.sale_id
+      LEFT JOIN users ON users.id = inventory_movements.user_id
+      ORDER BY inventory_movements.created_at DESC
+    `;
+    const { rows } = await pool.query(query);
+    return res.json(rows);
+  } catch (error) {
+    return sendDatabaseError(res, error, "No se pudieron cargar los movimientos");
+  }
 }
 
 export async function createMovement(req, res) {
   const { productId, movementType, quantity, note } = req.body;
 
   if (!productId || !movementType || !quantity) {
-    return res.status(400).json({ message: "Producto, tipo y cantidad son obligatorios" });
+    return sendError(res, 400, "Producto, tipo y cantidad son obligatorios");
   }
 
   const qty = Number(quantity);
 
-  if (qty <= 0) {
-    return res.status(400).json({ message: "La cantidad debe ser mayor a cero" });
+  if (!Number.isInteger(qty) || qty <= 0) {
+    return sendError(res, 400, "La cantidad debe ser un entero positivo");
   }
 
   const client = await pool.connect();
@@ -47,22 +53,13 @@ export async function createMovement(req, res) {
       return res.status(404).json({ message: "Producto no encontrado" });
     }
 
-    let newStock = product.current_stock;
+    let newStock;
 
-    if (movementType === "entrada") {
-      newStock += qty;
-    } else if (movementType === "salida") {
-      newStock -= qty;
-    } else if (movementType === "ajuste") {
-      newStock = qty;
-    } else {
+    try {
+      newStock = calculateUpdatedStock(product.current_stock, movementType, qty);
+    } catch (error) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ message: "Tipo de movimiento no valido" });
-    }
-
-    if (newStock < 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ message: "No se puede dejar el stock en negativo" });
+      return sendError(res, 400, error.message);
     }
 
     await client.query(
@@ -77,7 +74,7 @@ export async function createMovement(req, res) {
     return res.status(201).json({ message: "Movimiento registrado", currentStock: newStock });
   } catch (error) {
     await client.query("ROLLBACK");
-    return res.status(500).json({ message: "No se pudo registrar el movimiento", error: error.message });
+    return sendDatabaseError(res, error, "No se pudo registrar el movimiento");
   } finally {
     client.release();
   }

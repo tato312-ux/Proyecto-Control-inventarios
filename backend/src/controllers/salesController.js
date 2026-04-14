@@ -1,9 +1,6 @@
 import { pool } from "../db.js";
-
-function buildSaleNumber() {
-  const stamp = Date.now().toString().slice(-8);
-  return `VTA-${stamp}`;
-}
+import { buildSaleNumber, normalizeSaleItems } from "../services/salesService.js";
+import { sendDatabaseError, sendError } from "../utils/http.js";
 
 export async function getSales(_req, res) {
   try {
@@ -45,33 +42,34 @@ export async function getSales(_req, res) {
     return res.json(rows);
   } catch (error) {
     if (error.code === "42P01") {
-      return res.status(500).json({
-        message: "Falta aplicar la migracion de ventas en PostgreSQL"
-      });
+      return sendError(res, 500, "Falta aplicar la migracion de ventas en PostgreSQL");
     }
 
-    return res.status(500).json({
-      message: "No se pudieron cargar las ventas",
-      error: error.message
-    });
+    return sendDatabaseError(res, error, "No se pudieron cargar las ventas");
   }
 }
 
 export async function createSale(req, res) {
   const { customerName, customerDocument, note, items } = req.body;
+  let normalizedItems;
 
-  if (!Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ message: "Debes agregar al menos un producto a la venta" });
+  try {
+    normalizedItems = normalizeSaleItems(items);
+  } catch (error) {
+    return sendError(res, 400, error.message);
   }
 
-  const normalizedItems = items.map((item) => ({
-    productId: item.productId,
-    quantity: Number(item.quantity),
-    unitPrice: item.unitPrice === undefined || item.unitPrice === "" ? null : Number(item.unitPrice)
-  }));
-
-  if (normalizedItems.some((item) => !item.productId || item.quantity <= 0 || Number.isNaN(item.quantity))) {
-    return res.status(400).json({ message: "Todos los items deben tener producto y cantidad valida" });
+  if (
+    normalizedItems.some(
+      (item) =>
+        !item.productId ||
+        !Number.isInteger(item.quantity) ||
+        item.quantity <= 0 ||
+        Number.isNaN(item.unitPrice) ||
+        (item.unitPrice !== null && item.unitPrice < 0)
+    )
+  ) {
+    return sendError(res, 400, "Todos los items deben tener producto, cantidad y precio validos");
   }
 
   const client = await pool.connect();
@@ -92,14 +90,16 @@ export async function createSale(req, res) {
 
       if (!product) {
         await client.query("ROLLBACK");
-        return res.status(404).json({ message: "Uno de los productos no existe" });
+        return sendError(res, 404, "Uno de los productos no existe");
       }
 
       if (product.current_stock < item.quantity) {
         await client.query("ROLLBACK");
-        return res.status(400).json({
-          message: `Stock insuficiente para ${product.name}. Disponible: ${product.current_stock}`
-        });
+        return sendError(
+          res,
+          400,
+          `Stock insuficiente para ${product.name}. Disponible: ${product.current_stock}`
+        );
       }
 
       const unitPrice = item.unitPrice ?? Number(product.sale_price);
@@ -163,12 +163,10 @@ export async function createSale(req, res) {
     await client.query("ROLLBACK");
 
     if (error.code === "42P01") {
-      return res.status(500).json({
-        message: "Falta aplicar la migracion de ventas en PostgreSQL"
-      });
+      return sendError(res, 500, "Falta aplicar la migracion de ventas en PostgreSQL");
     }
 
-    return res.status(500).json({ message: "No se pudo registrar la venta", error: error.message });
+    return sendDatabaseError(res, error, "No se pudo registrar la venta");
   } finally {
     client.release();
   }

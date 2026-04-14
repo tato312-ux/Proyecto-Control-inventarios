@@ -1,7 +1,9 @@
-const API_URL = "http://localhost:4000/api";
+import { clearSession, getValidToken } from "./auth.js";
+
+const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
 
 function getHeaders() {
-  const token = localStorage.getItem("token");
+  const token = getValidToken();
 
   return {
     "Content-Type": "application/json",
@@ -27,6 +29,10 @@ export async function apiRequest(path, options = {}) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    if (response.status === 401) {
+      clearSession();
+    }
+
     throw new Error(data.message || "Error en la solicitud");
   }
 

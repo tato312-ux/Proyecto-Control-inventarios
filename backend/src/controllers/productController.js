@@ -1,4 +1,5 @@
 import { pool } from "../db.js";
+import { sendDatabaseError, sendError } from "../utils/http.js";
 
 export async function getProducts(_req, res) {
   try {
@@ -15,7 +16,7 @@ export async function getProducts(_req, res) {
     const { rows } = await pool.query(query);
     return res.json(rows);
   } catch (error) {
-    return res.status(500).json({ message: "No se pudieron cargar los productos", error: error.message });
+    return sendDatabaseError(res, error, "No se pudieron cargar los productos");
   }
 }
 
@@ -30,7 +31,7 @@ export async function getLowStockProducts(_req, res) {
     const { rows } = await pool.query(query);
     return res.json(rows);
   } catch (error) {
-    return res.status(500).json({ message: "No se pudo cargar el stock bajo", error: error.message });
+    return sendDatabaseError(res, error, "No se pudo cargar el stock bajo");
   }
 }
 
@@ -48,7 +49,7 @@ export async function createProduct(req, res) {
   } = req.body;
 
   if (!sku || !name) {
-    return res.status(400).json({ message: "SKU y nombre son obligatorios" });
+    return sendError(res, 400, "SKU y nombre son obligatorios");
   }
 
   const parsedMinStock = Number(minStock || 0);
@@ -56,11 +57,11 @@ export async function createProduct(req, res) {
   const parsedSalePrice = Number(salePrice || 0);
 
   if ([parsedMinStock, parsedCurrentStock, parsedSalePrice].some(Number.isNaN)) {
-    return res.status(400).json({ message: "Stock y precio deben tener valores numericos validos" });
+    return sendError(res, 400, "Stock y precio deben tener valores numericos validos");
   }
 
   if (parsedMinStock < 0 || parsedCurrentStock < 0 || parsedSalePrice < 0) {
-    return res.status(400).json({ message: "Stock y precio no pueden ser negativos" });
+    return sendError(res, 400, "Stock y precio no pueden ser negativos");
   }
 
   try {
@@ -87,9 +88,9 @@ export async function createProduct(req, res) {
     return res.status(201).json(rows[0]);
   } catch (error) {
     if (error.code === "23505") {
-      return res.status(400).json({ message: "Ya existe un producto con ese SKU" });
+      return sendError(res, 400, "Ya existe un producto con ese SKU");
     }
 
-    return res.status(500).json({ message: "No se pudo registrar el producto", error: error.message });
+    return sendDatabaseError(res, error, "No se pudo registrar el producto");
   }
 }

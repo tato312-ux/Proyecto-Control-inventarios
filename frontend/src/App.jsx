@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { getValidToken, onAuthChange } from "./auth.js";
 import { Sidebar } from "./components/Sidebar.jsx";
 import { DashboardPage } from "./pages/DashboardPage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
@@ -7,11 +9,22 @@ import { ProductsPage } from "./pages/ProductsPage.jsx";
 import { SalesPage } from "./pages/SalesPage.jsx";
 
 function ProtectedLayout() {
-  const token = localStorage.getItem("token");
   const location = useLocation();
+  const [token, setToken] = useState(() => getValidToken());
+
+  useEffect(() => {
+    const syncAuth = () => setToken(getValidToken());
+    const cleanup = onAuthChange(syncAuth);
+    const intervalId = window.setInterval(syncAuth, 60_000);
+
+    return () => {
+      cleanup();
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   if (!token) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
   return (

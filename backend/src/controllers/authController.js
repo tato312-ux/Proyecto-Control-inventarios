@@ -1,51 +1,56 @@
 import bcrypt from "bcryptjs";
 import { pool } from "../db.js";
 import { createToken } from "../utils/token.js";
+import { sendDatabaseError, sendError, sendInternalError } from "../utils/http.js";
 
 export async function login(req, res) {
   const { email, password } = req.body;
 
   if (!email || !password) {
-    return res.status(400).json({ message: "Email y password son obligatorios" });
+    return sendError(res, 400, "Email y password son obligatorios");
   }
 
-  const query = `
-    SELECT users.id, users.full_name, users.email, users.password_hash, roles.name AS role
-    FROM users
-    JOIN roles ON roles.id = users.role_id
-    WHERE users.email = $1
-  `;
-  const { rows } = await pool.query(query, [email]);
-  const user = rows[0];
+  try {
+    const query = `
+      SELECT users.id, users.full_name, users.email, users.password_hash, roles.name AS role
+      FROM users
+      JOIN roles ON roles.id = users.role_id
+      WHERE users.email = $1
+    `;
+    const { rows } = await pool.query(query, [email]);
+    const user = rows[0];
 
-  if (!user) {
-    return res.status(401).json({ message: "Credenciales invalidas" });
-  }
-
-  const validPassword = await bcrypt.compare(password, user.password_hash);
-
-  if (!validPassword) {
-    return res.status(401).json({ message: "Credenciales invalidas" });
-  }
-
-  const token = createToken(user);
-
-  return res.json({
-    token,
-    user: {
-      id: user.id,
-      fullName: user.full_name,
-      email: user.email,
-      role: user.role
+    if (!user) {
+      return sendError(res, 401, "Credenciales invalidas");
     }
-  });
+
+    const validPassword = await bcrypt.compare(password, user.password_hash);
+
+    if (!validPassword) {
+      return sendError(res, 401, "Credenciales invalidas");
+    }
+
+    const token = createToken(user);
+
+    return res.json({
+      token,
+      user: {
+        id: user.id,
+        fullName: user.full_name,
+        email: user.email,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    return sendInternalError(res, error, "No se pudo iniciar sesion");
+  }
 }
 
 export async function register(req, res) {
   const { fullName, email, password, role = "almacen" } = req.body;
 
   if (!fullName || !email || !password) {
-    return res.status(400).json({ message: "Faltan campos obligatorios" });
+    return sendError(res, 400, "Faltan campos obligatorios");
   }
 
   const client = await pool.connect();
@@ -58,7 +63,7 @@ export async function register(req, res) {
 
     if (!roleRow) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ message: "Rol no valido" });
+      return sendError(res, 400, "Rol no valido");
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -82,7 +87,7 @@ export async function register(req, res) {
     });
   } catch (error) {
     await client.query("ROLLBACK");
-    return res.status(500).json({ message: "No se pudo registrar el usuario", error: error.message });
+    return sendDatabaseError(res, error, "No se pudo registrar el usuario");
   } finally {
     client.release();
   }

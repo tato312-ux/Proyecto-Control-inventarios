@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { apiRequest } from "../api.js";
+import { setSession } from "../auth.js";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -19,9 +21,8 @@ export function LoginPage() {
         body: JSON.stringify(form)
       });
 
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
-      navigate("/");
+      setSession(data.token, data.user);
+      navigate(location.state?.from || "/");
     } catch (err) {
       setError(err.message);
     } finally {
